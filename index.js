@@ -511,7 +511,7 @@ function updateWallet() {
   const rank = walletInfo.leaderboardRank ? walletInfo.leaderboardRank : "N/A";
 
   const content = `┌── Address   : {bright-yellow-fg}${shortAddress}{/bright-yellow-fg}
-│   ├── MON Native : {bright-green-fg}${mon}{/bright-green-fg}
+│   ├── MON        : {bright-green-fg}${mon}{/bright-green-fg}
 │   ├── WMON       : {bright-green-fg}${wmon}{/bright-green-fg}
 │   ├── USDC       : {bright-green-fg}${usdc}{/bright-green-fg}
 │   ├── sMON       : {bright-green-fg}${smon}{/bright-green-fg}
