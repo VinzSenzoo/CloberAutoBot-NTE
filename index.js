@@ -4,13 +4,16 @@ import figlet from "figlet";
 import { ethers } from "ethers";
 import axios from "axios";
 
-const RPC_URL = process.env.RPC_URL; 
-const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const RPC_URL = process.env.RPC_URL;
+const PRIVATE_KEY = (await fs.readFile("keys.txt", "utf-8"))
+  .replace(/\r/g, "")
+  .split("\n")
+  .filter(Boolean);
 const WMON_ADDRESS = process.env.WMON_ADDRESS;
 const USDC_ADDRESS = process.env.USDC_ADDRESS;
 const SMON_ADDRESS = process.env.SMON_ADDRESS;
-const DAK_ADDRESS = process.env.DAK_ADDRESS; 
-const WMON_SWAP_ADDRESS = process.env.WMON_SWAP_ADDRESS; 
+const DAK_ADDRESS = process.env.DAK_ADDRESS;
+const WMON_SWAP_ADDRESS = process.env.WMON_SWAP_ADDRESS;
 const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS;
 const NETWORK_NAME = "CLOBER TESTNET";
 const DEBUG_MODE = false;
@@ -21,7 +24,7 @@ const ERC20ABI = [
   "function decimals() view returns (uint8)",
   "function balanceOf(address owner) view returns (uint256)",
   "function approve(address spender, uint256 amount) returns (bool)",
-  "function allowance(address owner, address spender) view returns (uint256)"
+  "function allowance(address owner, address spender) view returns (uint256)",
 ];
 
 const WMON_ABI = [
@@ -30,16 +33,15 @@ const WMON_ABI = [
 ];
 
 const CLOBER_ABI = [
-  "function swap(address inToken, address outToken, uint256 inAmount, address recipient, bytes data) payable"
+  "function swap(address inToken, address outToken, uint256 inAmount, address recipient, bytes data) payable",
 ];
 
 const randomAmountRanges = {
-  "MON_WMON": { MON: { min: 0.1, max: 0.5 }, WMON: { min: 0.1, max: 0.5 } },
-  "MON_USDC": { MON: { min: 0.1, max: 0.5 }, USDC: { min: 0.3, max: 1.5 } },
-  "MON_sMON": { MON: { min: 0.1, max: 0.5 }, sMON: { min: 0.1, max: 0.5 } },
-  "MON_DAK": { MON: { min: 0.1, max: 0.5 }, DAK: { min: 0.3, max: 1.0 } }
+  MON_WMON: { MON: { min: 0.1, max: 0.5 }, WMON: { min: 0.1, max: 0.5 } },
+  MON_USDC: { MON: { min: 0.1, max: 0.5 }, USDC: { min: 0.3, max: 1.5 } },
+  MON_sMON: { MON: { min: 0.1, max: 0.5 }, sMON: { min: 0.1, max: 0.5 } },
+  MON_DAK: { MON: { min: 0.1, max: 0.5 }, DAK: { min: 0.3, max: 1.0 } },
 };
-
 
 let walletInfo = {
   address: "",
@@ -49,11 +51,12 @@ let walletInfo = {
   balanceSmon: "0.00",
   balanceDak: "0.00",
   totalVolumeUsd: "0.00",
-  leaderboardRank: "N/A", 
+  leaderboardRank: "N/A",
   network: NETWORK_NAME,
-  status: "Initializing"
+  status: "Initializing",
 };
 
+let currentWallet = PRIVATE_KEY[0];
 let transactionLogs = [];
 let swapRunning = false;
 let swapCancelled = false;
@@ -73,26 +76,40 @@ function getShortAddress(address) {
 }
 
 function getShortHash(hash) {
-  return hash && typeof hash === "string" && hash !== "0x" ? hash.slice(0, 6) + "..." + hash.slice(-4) : "Invalid Hash";
+  return hash && typeof hash === "string" && hash !== "0x"
+    ? hash.slice(0, 6) + "..." + hash.slice(-4)
+    : "Invalid Hash";
 }
 
 function addLog(message, type) {
   if (type === "debug" && !DEBUG_MODE) return;
   const timestamp = new Date().toLocaleTimeString();
   let coloredMessage = message;
-  if (type === "swap") coloredMessage = `{bright-cyan-fg}${message}{/bright-cyan-fg}`;
-  else if (type === "system") coloredMessage = `{bright-white-fg}${message}{/bright-white-fg}`;
-  else if (type === "error") coloredMessage = `{bright-red-fg}${message}{/bright-red-fg}`;
-  else if (type === "success") coloredMessage = `{bright-green-fg}${message}{/bright-green-fg}`;
-  else if (type === "warning") coloredMessage = `{bright-yellow-fg}${message}{/bright-yellow-fg}`;
-  else if (type === "debug") coloredMessage = `{bright-magenta-fg}${message}{/bright-magenta-fg}`;
+  if (type === "swap")
+    coloredMessage = `{bright-cyan-fg}${message}{/bright-cyan-fg}`;
+  else if (type === "system")
+    coloredMessage = `{bright-white-fg}${message}{/bright-white-fg}`;
+  else if (type === "error")
+    coloredMessage = `{bright-red-fg}${message}{/bright-red-fg}`;
+  else if (type === "success")
+    coloredMessage = `{bright-green-fg}${message}{/bright-green-fg}`;
+  else if (type === "warning")
+    coloredMessage = `{bright-yellow-fg}${message}{/bright-yellow-fg}`;
+  else if (type === "debug")
+    coloredMessage = `{bright-magenta-fg}${message}{/bright-magenta-fg}`;
 
-  transactionLogs.push(`{bright-cyan-fg}[{/bright-cyan-fg} {bold}{grey-fg}${timestamp}{/grey-fg}{/bold} {bright-cyan-fg}]{/bright-cyan-fg} {bold}${coloredMessage}{/bold}`);
+  transactionLogs.push(
+    `{bright-cyan-fg}[{/bright-cyan-fg} {bold}{grey-fg}${timestamp}{/grey-fg}{/bold} {bright-cyan-fg}]{/bright-cyan-fg} {bold}${coloredMessage}{/bold}`
+  );
   updateLogs();
 }
 
 function getRandomDelay() {
   return Math.random() * (60000 - 30000) + 30000;
+}
+
+function getRandomDelayPerWallet() {
+  return Math.random() * (180000 - 120000) + 120000;
 }
 
 function getRandomNumber(min, max) {
@@ -116,23 +133,27 @@ function clearTransactionLogs() {
 
 async function waitWithCancel(delay, type) {
   return Promise.race([
-    new Promise(resolve => setTimeout(resolve, delay)),
-    new Promise(resolve => {
+    new Promise((resolve) => setTimeout(resolve, delay)),
+    new Promise((resolve) => {
       const interval = setInterval(() => {
         if (type === "swap" && swapCancelled) {
           clearInterval(interval);
           resolve();
         }
       }, 100);
-    })
+    }),
   ]);
 }
 
 async function fetchLeaderboardData(walletAddress) {
   try {
-    const response = await axios.get(`https://alpha.clober.io/api/chains/10143/leaderboard/user-address/${walletAddress}`);
+    const response = await axios.get(
+      `https://alpha.clober.io/api/chains/10143/leaderboard/user-address/${walletAddress}`
+    );
     if (response.status === 200 && response.data.my_rank) {
-      walletInfo.totalVolumeUsd = parseFloat(response.data.my_rank.total_volume_usd).toFixed(2);
+      walletInfo.totalVolumeUsd = parseFloat(
+        response.data.my_rank.total_volume_usd
+      ).toFixed(2);
       walletInfo.leaderboardRank = response.data.my_rank.rank.toString();
     } else {
       throw new Error("Invalid leaderboard response");
@@ -144,22 +165,31 @@ async function fetchLeaderboardData(walletAddress) {
   }
 }
 
-async function addTransactionToQueue(transactionFunction, description = "Transaksi") {
+async function addTransactionToQueue(
+  transactionFunction,
+  description = "Transaksi"
+) {
   const transactionId = ++transactionIdCounter;
   transactionQueueList.push({
     id: transactionId,
     description,
     timestamp: new Date().toLocaleTimeString(),
-    status: "queued"
+    status: "queued",
   });
-  addLog(`Transaksi [${transactionId}] ditambahkan ke antrean: ${description}`, "system");
+  addLog(
+    `Transaksi [${transactionId}] ditambahkan ke antrean: ${description}`,
+    "system"
+  );
   updateQueueDisplay();
 
   transactionQueue = transactionQueue.then(async () => {
     updateTransactionStatus(transactionId, "processing");
     try {
       if (nextNonce === null) {
-        nextNonce = await provider.getTransactionCount(globalWallet.address, "pending");
+        nextNonce = await provider.getTransactionCount(
+          globalWallet.address,
+          "pending"
+        );
         addLog(`Nonce awal: ${nextNonce}`, "debug");
       }
       const tx = await transactionFunction(nextNonce);
@@ -168,22 +198,35 @@ async function addTransactionToQueue(transactionFunction, description = "Transak
       nextNonce++;
       if (receipt.status === 1) {
         updateTransactionStatus(transactionId, "completed");
-        addLog(`Transaksi [${transactionId}] Selesai. Hash: ${getShortHash(receipt.transactionHash || txHash)}`, "debug");
+        addLog(
+          `Transaksi [${transactionId}] Selesai. Hash: ${getShortHash(
+            receipt.transactionHash || txHash
+          )}`,
+          "debug"
+        );
       } else {
         updateTransactionStatus(transactionId, "failed");
-        addLog(`Transaksi [${transactionId}] gagal: Transaksi ditolak oleh kontrak.`, "error");
+        addLog(
+          `Transaksi [${transactionId}] gagal: Transaksi ditolak oleh kontrak.`,
+          "error"
+        );
       }
       return { receipt, txHash, tx };
     } catch (error) {
       updateTransactionStatus(transactionId, "error");
       let errorMessage = error.message;
       if (error.code === "CALL_EXCEPTION") {
-        errorMessage = `Transaksi ditolak oleh kontrak: ${error.reason || "Alasan tidak diketahui"}`;
+        errorMessage = `Transaksi ditolak oleh kontrak: ${
+          error.reason || "Alasan tidak diketahui"
+        }`;
       }
       addLog(`Transaksi [${transactionId}] gagal: ${errorMessage}`, "error");
       if (error.message.includes("nonce has already been used")) {
         nextNonce++;
-        addLog(`Nonce diincrement karena sudah digunakan. Nilai nonce baru: ${nextNonce}`, "system");
+        addLog(
+          `Nonce diincrement karena sudah digunakan. Nilai nonce baru: ${nextNonce}`,
+          "system"
+        );
       }
       return null;
     } finally {
@@ -195,21 +238,25 @@ async function addTransactionToQueue(transactionFunction, description = "Transak
 }
 
 function updateTransactionStatus(id, status) {
-  transactionQueueList.forEach(tx => {
+  transactionQueueList.forEach((tx) => {
     if (tx.id === id) tx.status = status;
   });
   updateQueueDisplay();
 }
 
 function removeTransactionFromQueue(id) {
-  transactionQueueList = transactionQueueList.filter(tx => tx.id !== id);
+  transactionQueueList = transactionQueueList.filter((tx) => tx.id !== id);
   updateQueueDisplay();
 }
 
 function getTransactionQueueContent() {
-  if (transactionQueueList.length === 0) return "Tidak ada transaksi dalam antrean.";
+  if (transactionQueueList.length === 0)
+    return "Tidak ada transaksi dalam antrean.";
   return transactionQueueList
-    .map(tx => `ID: ${tx.id} | ${tx.description} | ${tx.status} | ${tx.timestamp}`)
+    .map(
+      (tx) =>
+        `ID: ${tx.id} | ${tx.description} | ${tx.status} | ${tx.timestamp}`
+    )
     .join("\n");
 }
 
@@ -227,7 +274,7 @@ function showTransactionQueueMenu() {
     style: { border: { fg: "blue" } },
     keys: true,
     mouse: true,
-    interactive: true
+    interactive: true,
   });
   const contentBox = blessed.box({
     top: 0,
@@ -239,7 +286,7 @@ function showTransactionQueueMenu() {
     keys: true,
     mouse: true,
     alwaysScroll: true,
-    scrollbar: { ch: " ", inverse: true, style: { bg: "blue" } }
+    scrollbar: { ch: " ", inverse: true, style: { bg: "blue" } },
   });
   const exitButton = blessed.button({
     content: " [Keluar] ",
@@ -250,7 +297,7 @@ function showTransactionQueueMenu() {
     style: { fg: "white", bg: "red", hover: { bg: "blue" } },
     mouse: true,
     keys: true,
-    interactive: true
+    interactive: true,
   });
   exitButton.on("press", () => {
     addLog("Keluar Dari Menu Antrian Transaksi.", "system");
@@ -293,14 +340,16 @@ const screen = blessed.screen({
   smartCSR: true,
   title: "Clober Swap",
   fullUnicode: true,
-  mouse: true
+  mouse: true,
 });
 
 let renderTimeout;
 
 function safeRender() {
   if (renderTimeout) clearTimeout(renderTimeout);
-  renderTimeout = setTimeout(() => { screen.render(); }, 50);
+  renderTimeout = setTimeout(() => {
+    screen.render();
+  }, 50);
 }
 
 const headerBox = blessed.box({
@@ -308,21 +357,29 @@ const headerBox = blessed.box({
   left: "center",
   width: "100%",
   tags: true,
-  style: { fg: "white", bg: "default" }
+  style: { fg: "white", bg: "default" },
 });
 
-figlet.text("NT EXHAUST".toUpperCase(), { font: "ANSI Shadow" }, (err, data) => {
-  if (err) headerBox.setContent("{center}{bold}NT Exhaust{/bold}{/center}");
-  else headerBox.setContent(`{center}{bold}{bright-cyan-fg}${data}{/bright-cyan-fg}{/bold}{/center}`);
-  safeRender();
-});
+figlet.text(
+  "NT EXHAUST".toUpperCase(),
+  { font: "ANSI Shadow" },
+  (err, data) => {
+    if (err) headerBox.setContent("{center}{bold}NT Exhaust{/bold}{/center}");
+    else
+      headerBox.setContent(
+        `{center}{bold}{bright-cyan-fg}${data}{/bright-cyan-fg}{/bold}{/center}`
+      );
+    safeRender();
+  }
+);
 
 const descriptionBox = blessed.box({
   left: "center",
   width: "100%",
-  content: "{center}{bold}{bright-yellow-fg}✦ ✦ CLOBER AUTO SWAP ✦ ✦{/bright-yellow-fg}{/bold}{/center}",
+  content:
+    "{center}{bold}{bright-yellow-fg}✦ ✦ CLOBER AUTO SWAP ✦ ✦{/bright-yellow-fg}{/bold}{/center}",
   tags: true,
-  style: { fg: "white", bg: "default" }
+  style: { fg: "white", bg: "default" },
 });
 
 const logsBox = blessed.box({
@@ -337,7 +394,7 @@ const logsBox = blessed.box({
   tags: true,
   style: { border: { fg: "red" }, fg: "white" },
   scrollbar: { ch: " ", inverse: true, style: { bg: "blue" } },
-  content: ""
+  content: "",
 });
 
 const walletBox = blessed.box({
@@ -345,7 +402,7 @@ const walletBox = blessed.box({
   border: { type: "line" },
   tags: true,
   style: { border: { fg: "magenta" }, fg: "white", bg: "default" },
-  content: "Loading data wallet..."
+  content: "Loading data wallet...",
 });
 
 const mainMenu = blessed.list({
@@ -355,14 +412,25 @@ const mainMenu = blessed.list({
   vi: true,
   mouse: true,
   border: { type: "line" },
-  style: { fg: "white", bg: "default", border: { fg: "red" }, selected: { bg: "green", fg: "black" } },
-  items: getMainMenuItems()
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "red" },
+    selected: { bg: "green", fg: "black" },
+  },
+  items: getMainMenuItems(),
 });
 
 function getMainMenuItems() {
   let items = [];
   if (swapRunning) items.push("Stop Transaction");
-  items = items.concat(["Clober Swap", "Antrian Transaksi", "Clear Transaction Logs", "Refresh", "Exit"]);
+  items = items.concat([
+    "Clober Swap",
+    "Antrian Transaksi",
+    "Clear Transaction Logs",
+    "Refresh",
+    "Exit",
+  ]);
   return items;
 }
 
@@ -373,11 +441,11 @@ function getCloberSwapMenuItems() {
     "Auto Swap MON & WMON",
     "Auto Swap MON & USDC",
     "Auto Swap MON & sMON",
-    "Auto Swap MON & DAK", 
+    "Auto Swap MON & DAK",
     "Change Random Amount",
     "Clear Transaction Logs",
     "Back To Main Menu",
-    "Refresh"
+    "Refresh",
   ]);
   return items;
 }
@@ -390,8 +458,13 @@ const cloberSwapSubMenu = blessed.list({
   mouse: true,
   tags: true,
   border: { type: "line" },
-  style: { fg: "white", bg: "default", border: { fg: "red" }, selected: { bg: "cyan", fg: "black" } },
-  items: getCloberSwapMenuItems()
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "red" },
+    selected: { bg: "cyan", fg: "black" },
+  },
+  items: getCloberSwapMenuItems(),
 });
 cloberSwapSubMenu.hide();
 
@@ -403,8 +476,19 @@ const changeRandomAmountSubMenu = blessed.list({
   mouse: true,
   tags: true,
   border: { type: "line" },
-  style: { fg: "white", bg: "default", border: { fg: "red" }, selected: { bg: "cyan", fg: "black" } },
-  items: ["MON & WMON", "MON & USDC", "MON & sMON", "MON & DAK", "Back To Clober Swap Menu"] // Added MON & DAK
+  style: {
+    fg: "white",
+    bg: "default",
+    border: { fg: "red" },
+    selected: { bg: "cyan", fg: "black" },
+  },
+  items: [
+    "MON & WMON",
+    "MON & USDC",
+    "MON & sMON",
+    "MON & DAK",
+    "Back To Clober Swap Menu",
+  ], // Added MON & DAK
 });
 changeRandomAmountSubMenu.hide();
 
@@ -420,7 +504,7 @@ const promptBox = blessed.prompt({
   keys: true,
   vi: true,
   mouse: true,
-  style: { fg: "bright-red", bg: "default", border: { fg: "red" } }
+  style: { fg: "bright-red", bg: "default", border: { fg: "red" } },
 });
 
 screen.append(headerBox);
@@ -451,7 +535,8 @@ function adjustLayout() {
   mainMenu.top = headerHeight + descriptionBox.height + walletBox.height;
   mainMenu.left = Math.floor(screenWidth * 0.6);
   mainMenu.width = Math.floor(screenWidth * 0.4);
-  mainMenu.height = screenHeight - (headerHeight + descriptionBox.height + walletBox.height);
+  mainMenu.height =
+    screenHeight - (headerHeight + descriptionBox.height + walletBox.height);
   cloberSwapSubMenu.top = mainMenu.top;
   cloberSwapSubMenu.left = mainMenu.left;
   cloberSwapSubMenu.width = mainMenu.width;
@@ -473,7 +558,10 @@ async function getTokenBalance(tokenAddress) {
     const decimals = await contract.decimals();
     return ethers.formatUnits(balance, decimals);
   } catch (error) {
-    addLog(`Gagal mengambil saldo token ${tokenAddress}: ${error.message}`, "error");
+    addLog(
+      `Gagal mengambil saldo token ${tokenAddress}: ${error.message}`,
+      "error"
+    );
     return "0";
   }
 }
@@ -481,7 +569,7 @@ async function getTokenBalance(tokenAddress) {
 async function updateWalletData() {
   try {
     provider = new ethers.JsonRpcProvider(RPC_URL);
-    const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+    const wallet = new ethers.Wallet(currentWallet, provider);
     globalWallet = wallet;
     walletInfo.address = wallet.address;
 
@@ -501,13 +589,27 @@ async function updateWalletData() {
 }
 
 function updateWallet() {
-  const shortAddress = walletInfo.address ? getShortAddress(walletInfo.address) : "N/A";
-  const mon = walletInfo.balanceMon ? Number(walletInfo.balanceMon).toFixed(4) : "0.0000";
-  const wmon = walletInfo.balanceWmon ? Number(walletInfo.balanceWmon).toFixed(4) : "0.0000";
-  const usdc = walletInfo.balanceUsdc ? Number(walletInfo.balanceUsdc).toFixed(2) : "0.00";
-  const smon = walletInfo.balanceSmon ? Number(walletInfo.balanceSmon).toFixed(4) : "0.0000";
-  const dak = walletInfo.balanceDak ? Number(walletInfo.balanceDak).toFixed(4) : "0.0000";
-  const totalVolume = walletInfo.totalVolumeUsd ? walletInfo.totalVolumeUsd : "0.00";
+  const shortAddress = walletInfo.address
+    ? getShortAddress(walletInfo.address)
+    : "N/A";
+  const mon = walletInfo.balanceMon
+    ? Number(walletInfo.balanceMon).toFixed(4)
+    : "0.0000";
+  const wmon = walletInfo.balanceWmon
+    ? Number(walletInfo.balanceWmon).toFixed(4)
+    : "0.0000";
+  const usdc = walletInfo.balanceUsdc
+    ? Number(walletInfo.balanceUsdc).toFixed(2)
+    : "0.00";
+  const smon = walletInfo.balanceSmon
+    ? Number(walletInfo.balanceSmon).toFixed(4)
+    : "0.0000";
+  const dak = walletInfo.balanceDak
+    ? Number(walletInfo.balanceDak).toFixed(4)
+    : "0.0000";
+  const totalVolume = walletInfo.totalVolumeUsd
+    ? walletInfo.totalVolumeUsd
+    : "0.00";
   const rank = walletInfo.leaderboardRank ? walletInfo.leaderboardRank : "N/A";
 
   const content = `┌── Address   : {bright-yellow-fg}${shortAddress}{/bright-yellow-fg}
@@ -524,22 +626,37 @@ function updateWallet() {
 }
 
 async function autoSwapMonWmon() {
-  const direction = lastSwapDirectionMonWmon === "MON_TO_WMON" ? "WMON_TO_MON" : "MON_TO_WMON";
+  const direction =
+    lastSwapDirectionMonWmon === "MON_TO_WMON" ? "WMON_TO_MON" : "MON_TO_WMON";
   lastSwapDirectionMonWmon = direction;
 
   const ranges = randomAmountRanges["MON_WMON"];
-  const amount = direction === "MON_TO_WMON" 
-    ? getRandomNumber(ranges.MON.min, ranges.MON.max).toFixed(6)
-    : getRandomNumber(ranges.WMON.min, ranges.WMON.max).toFixed(6);
-  const swapContract = new ethers.Contract(WMON_SWAP_ADDRESS, WMON_ABI, globalWallet);
-  const wmonContract = new ethers.Contract(WMON_ADDRESS, ERC20ABI, globalWallet);
+  const amount =
+    direction === "MON_TO_WMON"
+      ? getRandomNumber(ranges.MON.min, ranges.MON.max).toFixed(6)
+      : getRandomNumber(ranges.WMON.min, ranges.WMON.max).toFixed(6);
+  const swapContract = new ethers.Contract(
+    WMON_SWAP_ADDRESS,
+    WMON_ABI,
+    globalWallet
+  );
+  const wmonContract = new ethers.Contract(
+    WMON_ADDRESS,
+    ERC20ABI,
+    globalWallet
+  );
   const decimals = await wmonContract.decimals();
   const amountWei = ethers.parseUnits(amount, decimals);
 
   if (direction === "MON_TO_WMON") {
     const monBalance = await provider.getBalance(globalWallet.address);
     if (parseFloat(ethers.formatEther(monBalance)) < parseFloat(amount)) {
-      addLog(`Insufficient MON balance: ${ethers.formatEther(monBalance)} < ${amount}`, "warning");
+      addLog(
+        `Insufficient MON balance: ${ethers.formatEther(
+          monBalance
+        )} < ${amount}`,
+        "warning"
+      );
       return false;
     }
 
@@ -547,56 +664,98 @@ async function autoSwapMonWmon() {
 
     let txParams = { value: amountWei, nonce: null };
     try {
-      const gasLimit = await swapContract.estimateGas.deposit({ value: amountWei });
+      const gasLimit = await swapContract.estimateGas.deposit({
+        value: amountWei,
+      });
       txParams.gasLimit = (gasLimit * BigInt(120)) / BigInt(100);
       addLog(`Estimasi gas: ${txParams.gasLimit}`, "debug");
     } catch (error) {
-      addLog(`Gas estimasi gagal untuk deposit: ${error.message}. Menggunakan gas default jaringan.`, "debug");
+      addLog(
+        `Gas estimasi gagal untuk deposit: ${error.message}. Menggunakan gas default jaringan.`,
+        "debug"
+      );
     }
 
     const swapTxFunction = async (nonce) => {
       txParams.nonce = nonce;
       const tx = await swapContract.deposit(txParams);
-      addLog(`Tx Sent ${amount} MON ➯ WMON, Hash: ${getShortHash(tx.hash)}`, "swap");
+      addLog(
+        `Tx Sent ${amount} MON ➯ WMON, Hash: ${getShortHash(tx.hash)}`,
+        "swap"
+      );
       return tx;
     };
 
-    const result = await addTransactionToQueue(swapTxFunction, `Swap ${amount} MON to WMON`);
+    const result = await addTransactionToQueue(
+      swapTxFunction,
+      `Swap ${amount} MON to WMON`
+    );
 
     if (result && result.receipt && result.receipt.status === 1) {
-      addLog(`Swap Berhasil ${amount} MON ➯ WMON, Hash: ${getShortHash(result.receipt.transactionHash || result.txHash)}`, "success");
+      addLog(
+        `Swap Berhasil ${amount} MON ➯ WMON, Hash: ${getShortHash(
+          result.receipt.transactionHash || result.txHash
+        )}`,
+        "success"
+      );
       return true;
     } else {
-      addLog(`Gagal swap MON to WMON. Transaksi mungkin gagal atau tertunda.`, "error");
+      addLog(
+        `Gagal swap MON to WMON. Transaksi mungkin gagal atau tertunda.`,
+        "error"
+      );
       return false;
     }
   } else {
     const wmonBalance = await getTokenBalance(WMON_ADDRESS);
     if (parseFloat(wmonBalance) < parseFloat(amount)) {
-      addLog(`Insufficient WMON balance: ${wmonBalance} < ${amount}`, "warning");
+      addLog(
+        `Insufficient WMON balance: ${wmonBalance} < ${amount}`,
+        "warning"
+      );
       return false;
     }
 
     addLog(`Melakukan Swap ${amount} WMON ➯ MON`, "swap");
 
-    const allowance = await wmonContract.allowance(globalWallet.address, WMON_SWAP_ADDRESS);
+    const allowance = await wmonContract.allowance(
+      globalWallet.address,
+      WMON_SWAP_ADDRESS
+    );
     if (allowance < amountWei) {
       addLog(`Requesting Approval untuk ${amount} WMON.`, "swap");
       let approveTxParams = { nonce: null };
       try {
-        const approveGasLimit = await wmonContract.estimateGas.approve(WMON_SWAP_ADDRESS, amountWei);
-        approveTxParams.gasLimit = (approveGasLimit * BigInt(120)) / BigInt(100);
-        addLog(`Estimasi gas untuk approve: ${approveTxParams.gasLimit}`, "debug");
+        const approveGasLimit = await wmonContract.estimateGas.approve(
+          WMON_SWAP_ADDRESS,
+          amountWei
+        );
+        approveTxParams.gasLimit =
+          (approveGasLimit * BigInt(120)) / BigInt(100);
+        addLog(
+          `Estimasi gas untuk approve: ${approveTxParams.gasLimit}`,
+          "debug"
+        );
       } catch (error) {
-        addLog(`Gas estimasi gagal untuk approve: ${error.message}. Menggunakan gas default jaringan.`, "debug");
+        addLog(
+          `Gas estimasi gagal untuk approve: ${error.message}. Menggunakan gas default jaringan.`,
+          "debug"
+        );
       }
       const approveTxFunction = async (nonce) => {
         approveTxParams.nonce = nonce;
-        const tx = await wmonContract.approve(WMON_SWAP_ADDRESS, amountWei, approveTxParams);
+        const tx = await wmonContract.approve(
+          WMON_SWAP_ADDRESS,
+          amountWei,
+          approveTxParams
+        );
         addLog(`Approval transaction sent.`, "swap");
         return tx;
       };
-      const result = await addTransactionToQueue(approveTxFunction, `Approve ${amount} WMON`);
+      const result = await addTransactionToQueue(
+        approveTxFunction,
+        `Approve ${amount} WMON`
+      );
       if (!result || !result.receipt || result.receipt.status !== 1) {
         addLog(`Approval gagal untuk WMON. Membatalkan swap.`, "error");
         return false;
@@ -610,43 +769,72 @@ async function autoSwapMonWmon() {
       txParams.gasLimit = (gasLimit * BigInt(120)) / BigInt(100);
       addLog(`Estimasi gas: ${txParams.gasLimit}`, "debug");
     } catch (error) {
-      addLog(`Gas estimasi gagal untuk withdraw: ${error.message}. Menggunakan gas default jaringan.`, "debug");
+      addLog(
+        `Gas estimasi gagal untuk withdraw: ${error.message}. Menggunakan gas default jaringan.`,
+        "debug"
+      );
     }
 
     const swapTxFunction = async (nonce) => {
       txParams.nonce = nonce;
       const tx = await swapContract.withdraw(amountWei, txParams);
-      addLog(`Tx Sent ${amount} WMON ➯ MON, Hash: ${getShortHash(tx.hash)}`, "swap");
+      addLog(
+        `Tx Sent ${amount} WMON ➯ MON, Hash: ${getShortHash(tx.hash)}`,
+        "swap"
+      );
       return tx;
     };
 
-    const result = await addTransactionToQueue(swapTxFunction, `Swap ${amount} WMON to MON`);
+    const result = await addTransactionToQueue(
+      swapTxFunction,
+      `Swap ${amount} WMON to MON`
+    );
 
     if (result && result.receipt && result.receipt.status === 1) {
-      addLog(`Swap Berhasil ${amount} WMON ➯ MON, Hash: ${getShortHash(result.receipt.transactionHash || result.txHash)}`, "success");
+      addLog(
+        `Swap Berhasil ${amount} WMON ➯ MON, Hash: ${getShortHash(
+          result.receipt.transactionHash || result.txHash
+        )}`,
+        "success"
+      );
       return true;
     } else {
-      addLog(`Gagal swap WMON to MON. Transaksi mungkin gagal atau tertunda.`, "error");
+      addLog(
+        `Gagal swap WMON to MON. Transaksi mungkin gagal atau tertunda.`,
+        "error"
+      );
       return false;
     }
   }
 }
 
 async function autoSwapMonUsdc() {
-  const direction = lastSwapDirectionMonUsdc === "MON_TO_USDC" ? "USDC_TO_MON" : "MON_TO_USDC";
+  const direction =
+    lastSwapDirectionMonUsdc === "MON_TO_USDC" ? "USDC_TO_MON" : "MON_TO_USDC";
   lastSwapDirectionMonUsdc = direction;
 
   const ranges = randomAmountRanges["MON_USDC"];
-  const usdcContract = new ethers.Contract(USDC_ADDRESS, ERC20ABI, globalWallet);
+  const usdcContract = new ethers.Contract(
+    USDC_ADDRESS,
+    ERC20ABI,
+    globalWallet
+  );
   const usdcDecimals = await usdcContract.decimals();
 
   const swapInterface = new ethers.Interface(CLOBER_ABI);
 
   if (direction === "MON_TO_USDC") {
-    const amountMon = getRandomNumber(ranges.MON.min, ranges.MON.max).toFixed(6);
+    const amountMon = getRandomNumber(ranges.MON.min, ranges.MON.max).toFixed(
+      6
+    );
     const monBalance = await provider.getBalance(globalWallet.address);
     if (parseFloat(ethers.formatEther(monBalance)) < parseFloat(amountMon)) {
-      addLog(`Insufficient MON balance: ${ethers.formatEther(monBalance)} < ${amountMon}`, "warning");
+      addLog(
+        `Insufficient MON balance: ${ethers.formatEther(
+          monBalance
+        )} < ${amountMon}`,
+        "warning"
+      );
       return false;
     }
 
@@ -654,7 +842,7 @@ async function autoSwapMonUsdc() {
 
     let swapData;
     try {
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise((resolve) => setTimeout(resolve, 3000));
       const response = await axios.get(OPEN_OCEAN_API, {
         params: {
           inTokenAddress: "0x0000000000000000000000000000000000000000",
@@ -663,15 +851,26 @@ async function autoSwapMonUsdc() {
           gasPrice: "52000000000",
           slippage: 1,
           account: globalWallet.address,
-          referrer: REFERRER
-        }
+          referrer: REFERRER,
+        },
       });
       if (response.data.code !== 200) {
-        addLog(`Gagal mendapatkan data swap dari API: ${response.data.message || "Unknown error"}`, "error");
+        addLog(
+          `Gagal mendapatkan data swap dari API: ${
+            response.data.message || "Unknown error"
+          }`,
+          "error"
+        );
         return false;
       }
       swapData = response.data.data;
-      addLog(`API Response: Mendapatkan ${ethers.formatUnits(swapData.outAmount, usdcDecimals)} USDC untuk ${amountMon} MON`, "debug");
+      addLog(
+        `API Response: Mendapatkan ${ethers.formatUnits(
+          swapData.outAmount,
+          usdcDecimals
+        )} USDC untuk ${amountMon} MON`,
+        "debug"
+      );
     } catch (error) {
       addLog(`Gagal memanggil API OpenOcean: ${error.message}`, "error");
       return false;
@@ -683,48 +882,83 @@ async function autoSwapMonUsdc() {
     const recipient = swapData.to;
     const data = swapData.data;
 
-    const callData = swapInterface.encodeFunctionData("swap", [inToken, outToken, inAmount, recipient, data]);
+    const callData = swapInterface.encodeFunctionData("swap", [
+      inToken,
+      outToken,
+      inAmount,
+      recipient,
+      data,
+    ]);
 
     let txParams = {
       to: ROUTER_ADDRESS,
       data: callData,
       value: inAmount,
-      nonce: null
+      nonce: null,
     };
 
     try {
       const gasLimit = await provider.estimateGas({
         ...txParams,
-        from: globalWallet.address
+        from: globalWallet.address,
       });
       txParams.gasLimit = (gasLimit * BigInt(120)) / BigInt(100);
       addLog(`Estimasi gas: ${txParams.gasLimit}`, "debug");
     } catch (error) {
-      addLog(`Gas estimasi gagal: ${error.message}. Menggunakan gas default 52000`, "debug");
+      addLog(
+        `Gas estimasi gagal: ${error.message}. Menggunakan gas default 52000`,
+        "debug"
+      );
       txParams.gasLimit = 52000;
     }
 
     const swapTxFunction = async (nonce) => {
       txParams.nonce = nonce;
       const tx = await globalWallet.sendTransaction(txParams);
-      addLog(`Tx Sent ${amountMon} MON ➯ ${ethers.formatUnits(swapData.outAmount, usdcDecimals)} USDC, Hash: ${getShortHash(tx.hash)}`, "swap");
+      addLog(
+        `Tx Sent ${amountMon} MON ➯ ${ethers.formatUnits(
+          swapData.outAmount,
+          usdcDecimals
+        )} USDC, Hash: ${getShortHash(tx.hash)}`,
+        "swap"
+      );
       return tx;
     };
 
-    const result = await addTransactionToQueue(swapTxFunction, `Swap ${amountMon} MON to USDC`);
+    const result = await addTransactionToQueue(
+      swapTxFunction,
+      `Swap ${amountMon} MON to USDC`
+    );
 
     if (result && result.receipt && result.receipt.status === 1) {
-      addLog(`Swap Berhasil ${amountMon} MON ➯ ${ethers.formatUnits(swapData.outAmount, usdcDecimals)} USDC, Hash: ${getShortHash(result.receipt.transactionHash || result.txHash)}`, "success");
+      addLog(
+        `Swap Berhasil ${amountMon} MON ➯ ${ethers.formatUnits(
+          swapData.outAmount,
+          usdcDecimals
+        )} USDC, Hash: ${getShortHash(
+          result.receipt.transactionHash || result.txHash
+        )}`,
+        "success"
+      );
       return true;
     } else {
-      addLog(`Gagal swap MON to USDC. Transaksi mungkin gagal atau tertunda.`, "error");
+      addLog(
+        `Gagal swap MON to USDC. Transaksi mungkin gagal atau tertunda.`,
+        "error"
+      );
       return false;
     }
   } else {
-    const amountUsdc = getRandomNumber(ranges.USDC.min, ranges.USDC.max).toFixed(6);
+    const amountUsdc = getRandomNumber(
+      ranges.USDC.min,
+      ranges.USDC.max
+    ).toFixed(6);
     const usdcBalance = await getTokenBalance(USDC_ADDRESS);
     if (parseFloat(usdcBalance) < parseFloat(amountUsdc)) {
-      addLog(`Insufficient USDC balance: ${usdcBalance} < ${amountUsdc}`, "warning");
+      addLog(
+        `Insufficient USDC balance: ${usdcBalance} < ${amountUsdc}`,
+        "warning"
+      );
       return false;
     }
 
@@ -732,7 +966,7 @@ async function autoSwapMonUsdc() {
 
     let swapData;
     try {
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise((resolve) => setTimeout(resolve, 3000));
       const response = await axios.get(OPEN_OCEAN_API, {
         params: {
           inTokenAddress: USDC_ADDRESS,
@@ -741,15 +975,25 @@ async function autoSwapMonUsdc() {
           gasPrice: "52000000000",
           slippage: 1,
           account: globalWallet.address,
-          referrer: REFERRER
-        }
+          referrer: REFERRER,
+        },
       });
       if (response.data.code !== 200) {
-        addLog(`Gagal mendapatkan data swap dari API: ${response.data.message || "Unknown error"}`, "error");
+        addLog(
+          `Gagal mendapatkan data swap dari API: ${
+            response.data.message || "Unknown error"
+          }`,
+          "error"
+        );
         return false;
       }
       swapData = response.data.data;
-      addLog(`API Response: Mendapatkan ${ethers.formatEther(swapData.outAmount)} MON untuk ${amountUsdc} USDC`, "debug");
+      addLog(
+        `API Response: Mendapatkan ${ethers.formatEther(
+          swapData.outAmount
+        )} MON untuk ${amountUsdc} USDC`,
+        "debug"
+      );
     } catch (error) {
       addLog(`Gagal memanggil API OpenOcean: ${error.message}`, "error");
       return false;
@@ -761,25 +1005,42 @@ async function autoSwapMonUsdc() {
     const recipient = swapData.to;
     const data = swapData.data;
 
-    const allowance = await usdcContract.allowance(globalWallet.address, ROUTER_ADDRESS);
+    const allowance = await usdcContract.allowance(
+      globalWallet.address,
+      ROUTER_ADDRESS
+    );
     if (allowance < inAmount) {
       addLog(`Requesting Approval untuk ${amountUsdc} USDC.`, "swap");
       let approveTxParams = { nonce: null };
       try {
-        const approveGasLimit = await usdcContract.estimateGas.approve(ROUTER_ADDRESS, inAmount);
-        approveTxParams.gasLimit = (approveGasLimit * BigInt(120)) / BigInt(100);
+        const approveGasLimit = await usdcContract.estimateGas.approve(
+          ROUTER_ADDRESS,
+          inAmount
+        );
+        approveTxParams.gasLimit =
+          (approveGasLimit * BigInt(120)) / BigInt(100);
         addLog(`Estimasi gas: ${approveTxParams.gasLimit}`, "debug");
       } catch (error) {
-        addLog(`Gas estimasi gagal: ${error.message}. Menggunakan gas default 100,000.`, "debug");
+        addLog(
+          `Gas estimasi gagal: ${error.message}. Menggunakan gas default 100,000.`,
+          "debug"
+        );
         approveTxParams.gasLimit = 100000;
       }
       const approveTxFunction = async (nonce) => {
         approveTxParams.nonce = nonce;
-        const tx = await usdcContract.approve(ROUTER_ADDRESS, inAmount, approveTxParams);
+        const tx = await usdcContract.approve(
+          ROUTER_ADDRESS,
+          inAmount,
+          approveTxParams
+        );
         addLog(`Approval transaction sent.`, "swap");
         return tx;
       };
-      const result = await addTransactionToQueue(approveTxFunction, `Approve ${amountUsdc} USDC`);
+      const result = await addTransactionToQueue(
+        approveTxFunction,
+        `Approve ${amountUsdc} USDC`
+      );
       if (!result || !result.receipt || result.receipt.status !== 1) {
         addLog(`Approval gagal untuk USDC. Membatalkan swap.`, "error");
         return false;
@@ -787,61 +1048,100 @@ async function autoSwapMonUsdc() {
       addLog(`Approval Berhasil ${amountUsdc} USDC.`, "swap");
     }
 
-    const callData = swapInterface.encodeFunctionData("swap", [inToken, outToken, inAmount, recipient, data]);
+    const callData = swapInterface.encodeFunctionData("swap", [
+      inToken,
+      outToken,
+      inAmount,
+      recipient,
+      data,
+    ]);
 
     let txParams = {
       to: ROUTER_ADDRESS,
       data: callData,
       value: ethers.parseUnits(swapData.value || "0", "wei"),
-      nonce: null
+      nonce: null,
     };
 
     try {
       const gasLimit = await provider.estimateGas({
         ...txParams,
-        from: globalWallet.address
+        from: globalWallet.address,
       });
       txParams.gasLimit = (gasLimit * BigInt(120)) / BigInt(100);
       addLog(`Estimasi gas: ${txParams.gasLimit}`, "debug");
     } catch (error) {
-      addLog(`Gas estimasi gagal: ${error.message}. Menggunakan gas default 50000.`, "debug");
+      addLog(
+        `Gas estimasi gagal: ${error.message}. Menggunakan gas default 50000.`,
+        "debug"
+      );
       txParams.gasLimit = 50000;
     }
 
     const swapTxFunction = async (nonce) => {
       txParams.nonce = nonce;
       const tx = await globalWallet.sendTransaction(txParams);
-      addLog(`Tx Sent ${amountUsdc} USDC ➯ ${ethers.formatEther(swapData.outAmount)} MON, Hash: ${getShortHash(tx.hash)}`, "swap");
+      addLog(
+        `Tx Sent ${amountUsdc} USDC ➯ ${ethers.formatEther(
+          swapData.outAmount
+        )} MON, Hash: ${getShortHash(tx.hash)}`,
+        "swap"
+      );
       return tx;
     };
 
-    const result = await addTransactionToQueue(swapTxFunction, `Swap ${amountUsdc} USDC to MON`);
+    const result = await addTransactionToQueue(
+      swapTxFunction,
+      `Swap ${amountUsdc} USDC to MON`
+    );
 
     if (result && result.receipt && result.receipt.status === 1) {
-      addLog(`Swap Berhasil ${amountUsdc} USDC ➯ ${ethers.formatEther(swapData.outAmount)} MON, Hash: ${getShortHash(result.receipt.transactionHash || result.txHash)}`, "success");
+      addLog(
+        `Swap Berhasil ${amountUsdc} USDC ➯ ${ethers.formatEther(
+          swapData.outAmount
+        )} MON, Hash: ${getShortHash(
+          result.receipt.transactionHash || result.txHash
+        )}`,
+        "success"
+      );
       return true;
     } else {
-      addLog(`Gagal swap USDC to MON. Transaksi mungkin gagal atau tertunda.`, "error");
+      addLog(
+        `Gagal swap USDC to MON. Transaksi mungkin gagal atau tertunda.`,
+        "error"
+      );
       return false;
     }
   }
 }
 
 async function autoSwapMonSmon() {
-  const direction = lastSwapDirectionMonSmon === "MON_TO_sMON" ? "sMON_TO_MON" : "MON_TO_sMON";
+  const direction =
+    lastSwapDirectionMonSmon === "MON_TO_sMON" ? "sMON_TO_MON" : "MON_TO_sMON";
   lastSwapDirectionMonSmon = direction;
 
   const ranges = randomAmountRanges["MON_sMON"];
-  const smonContract = new ethers.Contract(SMON_ADDRESS, ERC20ABI, globalWallet);
+  const smonContract = new ethers.Contract(
+    SMON_ADDRESS,
+    ERC20ABI,
+    globalWallet
+  );
   const smonDecimals = await smonContract.decimals();
 
   const swapInterface = new ethers.Interface(CLOBER_ABI);
 
   if (direction === "MON_TO_sMON") {
-    const amountMon = getRandomNumber(ranges.MON.min, ranges.MON.max).toFixed(6);
+    const amountMon = getRandomNumber(ranges.MON.min, ranges.MON.max).toFixed(
+      6
+    );
     const monBalance = await provider.getBalance(globalWallet.address);
     if (parseFloat(ethers.formatEther(monBalance)) < parseFloat(amountMon)) {
-      addLog(`Insufficient MON balance: ${ethers.formatEther(monBalance)} < ${amountMon}`, "warning");
+      addLog(
+        `Insufficient MON balance: ${ethers.formatEther(
+          monBalance
+        )} < ${amountMon}`,
+        "warning"
+      );
       return false;
     }
 
@@ -849,7 +1149,7 @@ async function autoSwapMonSmon() {
 
     let swapData;
     try {
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise((resolve) => setTimeout(resolve, 3000));
       const response = await axios.get(OPEN_OCEAN_API, {
         params: {
           inTokenAddress: "0x0000000000000000000000000000000000000000",
@@ -858,15 +1158,26 @@ async function autoSwapMonSmon() {
           gasPrice: "52000000000",
           slippage: 1,
           account: globalWallet.address,
-          referrer: REFERRER
-        }
+          referrer: REFERRER,
+        },
       });
       if (response.data.code !== 200) {
-        addLog(`Gagal mendapatkan data swap dari API: ${response.data.message || "Unknown error"}`, "error");
+        addLog(
+          `Gagal mendapatkan data swap dari API: ${
+            response.data.message || "Unknown error"
+          }`,
+          "error"
+        );
         return false;
       }
       swapData = response.data.data;
-      addLog(`API Response: Mendapatkan ${ethers.formatUnits(swapData.outAmount, smonDecimals)} sMON untuk ${amountMon} MON`, "debug");
+      addLog(
+        `API Response: Mendapatkan ${ethers.formatUnits(
+          swapData.outAmount,
+          smonDecimals
+        )} sMON untuk ${amountMon} MON`,
+        "debug"
+      );
     } catch (error) {
       addLog(`Gagal memanggil API OpenOcean: ${error.message}`, "error");
       return false;
@@ -878,48 +1189,83 @@ async function autoSwapMonSmon() {
     const recipient = swapData.to;
     const data = swapData.data;
 
-    const callData = swapInterface.encodeFunctionData("swap", [inToken, outToken, inAmount, recipient, data]);
+    const callData = swapInterface.encodeFunctionData("swap", [
+      inToken,
+      outToken,
+      inAmount,
+      recipient,
+      data,
+    ]);
 
     let txParams = {
       to: ROUTER_ADDRESS,
       data: callData,
       value: inAmount,
-      nonce: null
+      nonce: null,
     };
 
     try {
       const gasLimit = await provider.estimateGas({
         ...txParams,
-        from: globalWallet.address
+        from: globalWallet.address,
       });
       txParams.gasLimit = (gasLimit * BigInt(120)) / BigInt(100);
       addLog(`Estimasi gas: ${txParams.gasLimit}`, "debug");
     } catch (error) {
-      addLog(`Gas estimasi gagal: ${error.message}. Menggunakan gas default 50000.`, "debug");
+      addLog(
+        `Gas estimasi gagal: ${error.message}. Menggunakan gas default 50000.`,
+        "debug"
+      );
       txParams.gasLimit = 50000;
     }
 
     const swapTxFunction = async (nonce) => {
       txParams.nonce = nonce;
       const tx = await globalWallet.sendTransaction(txParams);
-      addLog(`Tx Sent ${amountMon} MON ➯ ${ethers.formatUnits(swapData.outAmount, smonDecimals)} sMON, Hash: ${getShortHash(tx.hash)}`, "swap");
+      addLog(
+        `Tx Sent ${amountMon} MON ➯ ${ethers.formatUnits(
+          swapData.outAmount,
+          smonDecimals
+        )} sMON, Hash: ${getShortHash(tx.hash)}`,
+        "swap"
+      );
       return tx;
     };
 
-    const result = await addTransactionToQueue(swapTxFunction, `Swap ${amountMon} MON to sMON`);
+    const result = await addTransactionToQueue(
+      swapTxFunction,
+      `Swap ${amountMon} MON to sMON`
+    );
 
     if (result && result.receipt && result.receipt.status === 1) {
-      addLog(`Swap Berhasil ${amountMon} MON ➯ ${ethers.formatUnits(swapData.outAmount, smonDecimals)} sMON, Hash: ${getShortHash(result.receipt.transactionHash || result.txHash)}`, "success");
+      addLog(
+        `Swap Berhasil ${amountMon} MON ➯ ${ethers.formatUnits(
+          swapData.outAmount,
+          smonDecimals
+        )} sMON, Hash: ${getShortHash(
+          result.receipt.transactionHash || result.txHash
+        )}`,
+        "success"
+      );
       return true;
     } else {
-      addLog(`Gagal swap MON to sMON. Transaksi mungkin gagal atau tertunda.`, "error");
+      addLog(
+        `Gagal swap MON to sMON. Transaksi mungkin gagal atau tertunda.`,
+        "error"
+      );
       return false;
     }
   } else {
-    const amountSmon = getRandomNumber(ranges.sMON.min, ranges.sMON.max).toFixed(6);
+    const amountSmon = getRandomNumber(
+      ranges.sMON.min,
+      ranges.sMON.max
+    ).toFixed(6);
     const smonBalance = await getTokenBalance(SMON_ADDRESS);
     if (parseFloat(smonBalance) < parseFloat(amountSmon)) {
-      addLog(`Insufficient sMON balance: ${smonBalance} < ${amountSmon}`, "warning");
+      addLog(
+        `Insufficient sMON balance: ${smonBalance} < ${amountSmon}`,
+        "warning"
+      );
       return false;
     }
 
@@ -927,7 +1273,7 @@ async function autoSwapMonSmon() {
 
     let swapData;
     try {
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise((resolve) => setTimeout(resolve, 3000));
       const response = await axios.get(OPEN_OCEAN_API, {
         params: {
           inTokenAddress: SMON_ADDRESS,
@@ -936,15 +1282,25 @@ async function autoSwapMonSmon() {
           gasPrice: "52000000000",
           slippage: 1,
           account: globalWallet.address,
-          referrer: REFERRER
-        }
+          referrer: REFERRER,
+        },
       });
       if (response.data.code !== 200) {
-        addLog(`Gagal mendapatkan data swap dari API: ${response.data.message || "Unknown error"}`, "error");
+        addLog(
+          `Gagal mendapatkan data swap dari API: ${
+            response.data.message || "Unknown error"
+          }`,
+          "error"
+        );
         return false;
       }
       swapData = response.data.data;
-      addLog(`API Response: Mendapatkan ${ethers.formatEther(swapData.outAmount)} MON untuk ${amountSmon} sMON`, "debug");
+      addLog(
+        `API Response: Mendapatkan ${ethers.formatEther(
+          swapData.outAmount
+        )} MON untuk ${amountSmon} sMON`,
+        "debug"
+      );
     } catch (error) {
       addLog(`Gagal memanggil API OpenOcean: ${error.message}`, "error");
       return false;
@@ -956,25 +1312,42 @@ async function autoSwapMonSmon() {
     const recipient = swapData.to;
     const data = swapData.data;
 
-    const allowance = await smonContract.allowance(globalWallet.address, ROUTER_ADDRESS);
+    const allowance = await smonContract.allowance(
+      globalWallet.address,
+      ROUTER_ADDRESS
+    );
     if (allowance < inAmount) {
       addLog(`Requesting Approval untuk ${amountSmon} sMON.`, "swap");
       let approveTxParams = { nonce: null };
       try {
-        const approveGasLimit = await smonContract.estimateGas.approve(ROUTER_ADDRESS, inAmount);
-        approveTxParams.gasLimit = (approveGasLimit * BigInt(120)) / BigInt(100);
+        const approveGasLimit = await smonContract.estimateGas.approve(
+          ROUTER_ADDRESS,
+          inAmount
+        );
+        approveTxParams.gasLimit =
+          (approveGasLimit * BigInt(120)) / BigInt(100);
         addLog(`Estimasi gas: ${approveTxParams.gasLimit}`, "debug");
       } catch (error) {
-        addLog(`Gas estimasi gagal: ${error.message}. Menggunakan gas default 100,000.`, "debug");
+        addLog(
+          `Gas estimasi gagal: ${error.message}. Menggunakan gas default 100,000.`,
+          "debug"
+        );
         approveTxParams.gasLimit = 100000;
       }
       const approveTxFunction = async (nonce) => {
         approveTxParams.nonce = nonce;
-        const tx = await smonContract.approve(ROUTER_ADDRESS, inAmount, approveTxParams);
+        const tx = await smonContract.approve(
+          ROUTER_ADDRESS,
+          inAmount,
+          approveTxParams
+        );
         addLog(`Approval transaction sent.`, "swap");
         return tx;
       };
-      const result = await addTransactionToQueue(approveTxFunction, `Approve ${amountSmon} sMON`);
+      const result = await addTransactionToQueue(
+        approveTxFunction,
+        `Approve ${amountSmon} sMON`
+      );
       if (!result || !result.receipt || result.receipt.status !== 1) {
         addLog(`Approval gagal untuk sMON. Membatalkan swap.`, "error");
         return false;
@@ -982,48 +1355,76 @@ async function autoSwapMonSmon() {
       addLog(`Approval Berhasil ${amountSmon} sMON.`, "swap");
     }
 
-    const callData = swapInterface.encodeFunctionData("swap", [inToken, outToken, inAmount, recipient, data]);
+    const callData = swapInterface.encodeFunctionData("swap", [
+      inToken,
+      outToken,
+      inAmount,
+      recipient,
+      data,
+    ]);
 
     let txParams = {
       to: ROUTER_ADDRESS,
       data: callData,
       value: ethers.parseUnits(swapData.value || "0", "wei"),
-      nonce: null
+      nonce: null,
     };
 
     try {
       const gasLimit = await provider.estimateGas({
         ...txParams,
-        from: globalWallet.address
+        from: globalWallet.address,
       });
       txParams.gasLimit = (gasLimit * BigInt(120)) / BigInt(100);
       addLog(`Estimasi gas: ${txParams.gasLimit}`, "debug");
     } catch (error) {
-      addLog(`Gas estimasi gagal: ${error.message}. Menggunakan gas default 50000.`, "debug");
+      addLog(
+        `Gas estimasi gagal: ${error.message}. Menggunakan gas default 50000.`,
+        "debug"
+      );
       txParams.gasLimit = 50000;
     }
 
     const swapTxFunction = async (nonce) => {
       txParams.nonce = nonce;
       const tx = await globalWallet.sendTransaction(txParams);
-      addLog(`Tx Sent ${amountSmon} sMON ➯ ${ethers.formatEther(swapData.outAmount)} MON, Hash: ${getShortHash(tx.hash)}`, "swap");
+      addLog(
+        `Tx Sent ${amountSmon} sMON ➯ ${ethers.formatEther(
+          swapData.outAmount
+        )} MON, Hash: ${getShortHash(tx.hash)}`,
+        "swap"
+      );
       return tx;
     };
 
-    const result = await addTransactionToQueue(swapTxFunction, `Swap ${amountSmon} sMON to MON`);
+    const result = await addTransactionToQueue(
+      swapTxFunction,
+      `Swap ${amountSmon} sMON to MON`
+    );
 
     if (result && result.receipt && result.receipt.status === 1) {
-      addLog(`Swap Berhasil ${amountSmon} sMON ➯ ${ethers.formatEther(swapData.outAmount)} MON, Hash: ${getShortHash(result.receipt.transactionHash || result.txHash)}`, "success");
+      addLog(
+        `Swap Berhasil ${amountSmon} sMON ➯ ${ethers.formatEther(
+          swapData.outAmount
+        )} MON, Hash: ${getShortHash(
+          result.receipt.transactionHash || result.txHash
+        )}`,
+        "success"
+      );
       return true;
     } else {
-      addLog(`Gagal swap sMON to MON. Transaksi mungkin gagal atau tertunda.`, "error");
+      addLog(
+        `Gagal swap sMON to MON. Transaksi mungkin gagal atau tertunda.`,
+        "error"
+      );
       return false;
     }
   }
 }
 
 async function autoSwapMonDak() {
-  const direction = lastSwapDirectionMonDak === "MON_TO_DAK" ? "DAK_TO_MON" : "MON_TO_DAK";
+  const direction =
+    lastSwapDirectionMonDak === "MON_TO_DAK" ? "DAK_TO_MON" : "MON_TO_DAK";
   lastSwapDirectionMonDak = direction;
 
   const ranges = randomAmountRanges["MON_DAK"];
@@ -1033,10 +1434,17 @@ async function autoSwapMonDak() {
   const swapInterface = new ethers.Interface(CLOBER_ABI);
 
   if (direction === "MON_TO_DAK") {
-    const amountMon = getRandomNumber(ranges.MON.min, ranges.MON.max).toFixed(6);
+    const amountMon = getRandomNumber(ranges.MON.min, ranges.MON.max).toFixed(
+      6
+    );
     const monBalance = await provider.getBalance(globalWallet.address);
     if (parseFloat(ethers.formatEther(monBalance)) < parseFloat(amountMon)) {
-      addLog(`Insufficient MON balance: ${ethers.formatEther(monBalance)} < ${amountMon}`, "warning");
+      addLog(
+        `Insufficient MON balance: ${ethers.formatEther(
+          monBalance
+        )} < ${amountMon}`,
+        "warning"
+      );
       return false;
     }
 
@@ -1044,7 +1452,7 @@ async function autoSwapMonDak() {
 
     let swapData;
     try {
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise((resolve) => setTimeout(resolve, 3000));
       const response = await axios.get(OPEN_OCEAN_API, {
         params: {
           inTokenAddress: "0x0000000000000000000000000000000000000000",
@@ -1053,15 +1461,26 @@ async function autoSwapMonDak() {
           gasPrice: "52000000000",
           slippage: 1,
           account: globalWallet.address,
-          referrer: REFERRER
-        }
+          referrer: REFERRER,
+        },
       });
       if (response.data.code !== 200) {
-        addLog(`Gagal mendapatkan data swap dari API: ${response.data.message || "Unknown error"}`, "error");
+        addLog(
+          `Gagal mendapatkan data swap dari API: ${
+            response.data.message || "Unknown error"
+          }`,
+          "error"
+        );
         return false;
       }
       swapData = response.data.data;
-      addLog(`API Response: Mendapatkan ${ethers.formatUnits(swapData.outAmount, dakDecimals)} DAK untuk ${amountMon} MON`, "debug");
+      addLog(
+        `API Response: Mendapatkan ${ethers.formatUnits(
+          swapData.outAmount,
+          dakDecimals
+        )} DAK untuk ${amountMon} MON`,
+        "debug"
+      );
     } catch (error) {
       addLog(`Gagal memanggil API OpenOcean: ${error.message}`, "error");
       return false;
@@ -1073,48 +1492,82 @@ async function autoSwapMonDak() {
     const recipient = swapData.to;
     const data = swapData.data;
 
-    const callData = swapInterface.encodeFunctionData("swap", [inToken, outToken, inAmount, recipient, data]);
+    const callData = swapInterface.encodeFunctionData("swap", [
+      inToken,
+      outToken,
+      inAmount,
+      recipient,
+      data,
+    ]);
 
     let txParams = {
       to: ROUTER_ADDRESS,
       data: callData,
       value: inAmount,
-      nonce: null
+      nonce: null,
     };
 
     try {
       const gasLimit = await provider.estimateGas({
         ...txParams,
-        from: globalWallet.address
+        from: globalWallet.address,
       });
       txParams.gasLimit = (gasLimit * BigInt(120)) / BigInt(100);
       addLog(`Estimasi gas: ${txParams.gasLimit}`, "debug");
     } catch (error) {
-      addLog(`Gas estimasi gagal: ${error.message}. Menggunakan gas default 50000.`, "debug");
+      addLog(
+        `Gas estimasi gagal: ${error.message}. Menggunakan gas default 50000.`,
+        "debug"
+      );
       txParams.gasLimit = 50000;
     }
 
     const swapTxFunction = async (nonce) => {
       txParams.nonce = nonce;
       const tx = await globalWallet.sendTransaction(txParams);
-      addLog(`Tx Sent ${amountMon} MON ➯ ${ethers.formatUnits(swapData.outAmount, dakDecimals)} DAK, Hash: ${getShortHash(tx.hash)}`, "swap");
+      addLog(
+        `Tx Sent ${amountMon} MON ➯ ${ethers.formatUnits(
+          swapData.outAmount,
+          dakDecimals
+        )} DAK, Hash: ${getShortHash(tx.hash)}`,
+        "swap"
+      );
       return tx;
     };
 
-    const result = await addTransactionToQueue(swapTxFunction, `Swap ${amountMon} MON to DAK`);
+    const result = await addTransactionToQueue(
+      swapTxFunction,
+      `Swap ${amountMon} MON to DAK`
+    );
 
     if (result && result.receipt && result.receipt.status === 1) {
-      addLog(`Swap Berhasil ${amountMon} MON ➯ ${ethers.formatUnits(swapData.outAmount, dakDecimals)} DAK, Hash: ${getShortHash(result.receipt.transactionHash || result.txHash)}`, "success");
+      addLog(
+        `Swap Berhasil ${amountMon} MON ➯ ${ethers.formatUnits(
+          swapData.outAmount,
+          dakDecimals
+        )} DAK, Hash: ${getShortHash(
+          result.receipt.transactionHash || result.txHash
+        )}`,
+        "success"
+      );
       return true;
     } else {
-      addLog(`Gagal swap MON to DAK. Transaksi mungkin gagal atau tertunda.`, "error");
+      addLog(
+        `Gagal swap MON to DAK. Transaksi mungkin gagal atau tertunda.`,
+        "error"
+      );
       return false;
     }
   } else {
-    const amountDak = getRandomNumber(ranges.DAK.min, ranges.DAK.max).toFixed(6);
+    const amountDak = getRandomNumber(ranges.DAK.min, ranges.DAK.max).toFixed(
+      6
+    );
     const dakBalance = await getTokenBalance(DAK_ADDRESS);
     if (parseFloat(dakBalance) < parseFloat(amountDak)) {
-      addLog(`Insufficient DAK balance: ${dakBalance} < ${amountDak}`, "warning");
+      addLog(
+        `Insufficient DAK balance: ${dakBalance} < ${amountDak}`,
+        "warning"
+      );
       return false;
     }
 
@@ -1122,7 +1575,7 @@ async function autoSwapMonDak() {
 
     let swapData;
     try {
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise((resolve) => setTimeout(resolve, 3000));
       const response = await axios.get(OPEN_OCEAN_API, {
         params: {
           inTokenAddress: DAK_ADDRESS,
@@ -1131,15 +1584,25 @@ async function autoSwapMonDak() {
           gasPrice: "52000000000",
           slippage: 1,
           account: globalWallet.address,
-          referrer: REFERRER
-        }
+          referrer: REFERRER,
+        },
       });
       if (response.data.code !== 200) {
-        addLog(`Gagal mendapatkan data swap dari API: ${response.data.message || "Unknown error"}`, "error");
+        addLog(
+          `Gagal mendapatkan data swap dari API: ${
+            response.data.message || "Unknown error"
+          }`,
+          "error"
+        );
         return false;
       }
       swapData = response.data.data;
-      addLog(`API Response: Mendapatkan ${ethers.formatEther(swapData.outAmount)} MON untuk ${amountDak} DAK`, "debug");
+      addLog(
+        `API Response: Mendapatkan ${ethers.formatEther(
+          swapData.outAmount
+        )} MON untuk ${amountDak} DAK`,
+        "debug"
+      );
     } catch (error) {
       addLog(`Gagal memanggil API OpenOcean: ${error.message}`, "error");
       return false;
@@ -1151,25 +1614,42 @@ async function autoSwapMonDak() {
     const recipient = swapData.to;
     const data = swapData.data;
 
-    const allowance = await dakContract.allowance(globalWallet.address, ROUTER_ADDRESS);
+    const allowance = await dakContract.allowance(
+      globalWallet.address,
+      ROUTER_ADDRESS
+    );
     if (allowance < inAmount) {
       addLog(`Requesting Approval untuk ${amountDak} DAK.`, "swap");
       let approveTxParams = { nonce: null };
       try {
-        const approveGasLimit = await dakContract.estimateGas.approve(ROUTER_ADDRESS, inAmount);
-        approveTxParams.gasLimit = (approveGasLimit * BigInt(120)) / BigInt(100);
+        const approveGasLimit = await dakContract.estimateGas.approve(
+          ROUTER_ADDRESS,
+          inAmount
+        );
+        approveTxParams.gasLimit =
+          (approveGasLimit * BigInt(120)) / BigInt(100);
         addLog(`Estimasi gas: ${approveTxParams.gasLimit}`, "debug");
       } catch (error) {
-        addLog(`Gas estimasi gagal: ${error.message}. Menggunakan gas default 100,000.`, "debug");
+        addLog(
+          `Gas estimasi gagal: ${error.message}. Menggunakan gas default 100,000.`,
+          "debug"
+        );
         approveTxParams.gasLimit = 100000;
       }
       const approveTxFunction = async (nonce) => {
         approveTxParams.nonce = nonce;
-        const tx = await dakContract.approve(ROUTER_ADDRESS, inAmount, approveTxParams);
+        const tx = await dakContract.approve(
+          ROUTER_ADDRESS,
+          inAmount,
+          approveTxParams
+        );
         addLog(`Approval transaction sent.`, "swap");
         return tx;
       };
-      const result = await addTransactionToQueue(approveTxFunction, `Approve ${amountDak} DAK`);
+      const result = await addTransactionToQueue(
+        approveTxFunction,
+        `Approve ${amountDak} DAK`
+      );
       if (!result || !result.receipt || result.receipt.status !== 1) {
         addLog(`Approval gagal untuk DAK. Membatalkan swap.`, "error");
         return false;
@@ -1177,41 +1657,68 @@ async function autoSwapMonDak() {
       addLog(`Approval Berhasil ${amountDak} DAK.`, "swap");
     }
 
-    const callData = swapInterface.encodeFunctionData("swap", [inToken, outToken, inAmount, recipient, data]);
+    const callData = swapInterface.encodeFunctionData("swap", [
+      inToken,
+      outToken,
+      inAmount,
+      recipient,
+      data,
+    ]);
 
     let txParams = {
       to: ROUTER_ADDRESS,
       data: callData,
       value: ethers.parseUnits(swapData.value || "0", "wei"),
-      nonce: null
+      nonce: null,
     };
 
     try {
       const gasLimit = await provider.estimateGas({
         ...txParams,
-        from: globalWallet.address
+        from: globalWallet.address,
       });
       txParams.gasLimit = (gasLimit * BigInt(120)) / BigInt(100);
       addLog(`Estimasi gas: ${txParams.gasLimit}`, "debug");
     } catch (error) {
-      addLog(`Gas estimasi gagal: ${error.message}. Menggunakan gas default 50000.`, "debug");
+      addLog(
+        `Gas estimasi gagal: ${error.message}. Menggunakan gas default 50000.`,
+        "debug"
+      );
       txParams.gasLimit = 50000;
     }
 
     const swapTxFunction = async (nonce) => {
       txParams.nonce = nonce;
       const tx = await globalWallet.sendTransaction(txParams);
-      addLog(`Tx Sent ${amountDak} DAK ➯ ${ethers.formatEther(swapData.outAmount)} MON, Hash: ${getShortHash(tx.hash)}`, "swap");
+      addLog(
+        `Tx Sent ${amountDak} DAK ➯ ${ethers.formatEther(
+          swapData.outAmount
+        )} MON, Hash: ${getShortHash(tx.hash)}`,
+        "swap"
+      );
       return tx;
     };
 
-    const result = await addTransactionToQueue(swapTxFunction, `Swap ${amountDak} DAK to MON`);
+    const result = await addTransactionToQueue(
+      swapTxFunction,
+      `Swap ${amountDak} DAK to MON`
+    );
 
     if (result && result.receipt && result.receipt.status === 1) {
-      addLog(`Swap Berhasil ${amountDak} DAK ➯ ${ethers.formatEther(swapData.outAmount)} MON, Hash: ${getShortHash(result.receipt.transactionHash || result.txHash)}`, "success");
+      addLog(
+        `Swap Berhasil ${amountDak} DAK ➯ ${ethers.formatEther(
+          swapData.outAmount
+        )} MON, Hash: ${getShortHash(
+          result.receipt.transactionHash || result.txHash
+        )}`,
+        "success"
+      );
       return true;
     } else {
-      addLog(`Gagal swap DAK to MON. Transaksi mungkin gagal atau tertunda.`, "error");
+      addLog(
+        `Gagal swap DAK to MON. Transaksi mungkin gagal atau tertunda.`,
+        "error"
+      );
       return false;
     }
   }
@@ -1219,269 +1726,494 @@ async function autoSwapMonDak() {
 
 async function runAutoSwapMonWmon() {
   promptBox.setFront();
-  promptBox.readInput("Masukkan jumlah swap MON & WMON", "", async (err, value) => {
-    promptBox.hide();
-    safeRender();
-    if (err || !value) {
-      addLog("Clober Swap: Input tidak valid atau dibatalkan.", "swap");
-      return;
-    }
-    const loopCount = parseInt(value);
-    if (isNaN(loopCount)) {
-      addLog("Clober Swap: Input harus berupa angka.", "swap");
-      return;
-    }
-    addLog(`Clober Swap: Mulai ${loopCount} iterasi swap MON & WMON.`, "swap");
-
-    swapRunning = true;
-    swapCancelled = false;
-    mainMenu.setItems(getMainMenuItems());
-    cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
-    cloberSwapSubMenu.show();
-    safeRender();
-
-    for (let i = 1; i <= loopCount; i++) {
-      if (swapCancelled) {
-        addLog(`Clober Swap: Auto Swap MON & WMON Dihentikan pada Cycle ${i}.`, "swap");
-        break;
+  promptBox.readInput(
+    "Masukkan jumlah swap MON & WMON",
+    "",
+    async (err, value) => {
+      promptBox.hide();
+      safeRender();
+      if (err || !value) {
+        addLog("Clober Swap: Input tidak valid atau dibatalkan.", "swap");
+        return;
       }
-      addLog(`Memulai swap ke-${i}: Arah ${lastSwapDirectionMonWmon === "MON_TO_WMON" ? "WMON_TO_MON" : "MON_TO_WMON"}`, "swap");
-      const success = await autoSwapMonWmon();
-      if (success) {
+      const loopCount = parseInt(value);
+      if (isNaN(loopCount)) {
+        addLog("Clober Swap: Input harus berupa angka.", "swap");
+        return;
+      }
+      addLog(
+        `Clober Swap: Mulai ${loopCount} iterasi swap MON & WMON.`,
+        "swap"
+      );
+
+      let j = 1;
+
+      for (const key of PRIVATE_KEY) {
+        nextNonce = null;
+        swapRunning = true;
+        swapCancelled = false;
+        mainMenu.setItems(getMainMenuItems());
+        cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
+        cloberSwapSubMenu.show();
+        safeRender();
+
+        currentWallet = key;
+
         await updateWalletData();
-      }
-      if (i < loopCount) {
-        const delayTime = getRandomDelay();
-        const minutes = Math.floor(delayTime / 60000);
-        const seconds = Math.floor((delayTime % 60000) / 1000);
-        addLog(`Swap ke-${i} selesai. Menunggu ${minutes} menit ${seconds} detik.`, "swap");
-        await waitWithCancel(delayTime, "swap");
-        if (swapCancelled) {
-          addLog("Clober Swap: Dihentikan saat periode tunggu.", "swap");
-          break;
+
+        let i = 1;
+
+        for (i; i <= loopCount; i++) {
+          if (swapCancelled) {
+            addLog(
+              `Clober Swap: Auto Swap MON & WMON Dihentikan pada Cycle ${i}.`,
+              "swap"
+            );
+            break;
+          }
+          addLog(
+            `Memulai swap ke-${i}: Arah ${
+              lastSwapDirectionMonWmon === "MON_TO_WMON"
+                ? "WMON_TO_MON"
+                : "MON_TO_WMON"
+            }`,
+            "swap"
+          );
+          const success = await autoSwapMonWmon();
+          if (success) {
+            await updateWalletData();
+          }
+          if (i < loopCount) {
+            const delayTime = getRandomDelay();
+            const minutes = Math.floor(delayTime / 60000);
+            const seconds = Math.floor((delayTime % 60000) / 1000);
+            addLog(
+              `Swap ke-${i} selesai. Menunggu ${minutes} menit ${seconds} detik.`,
+              "swap"
+            );
+            await waitWithCancel(delayTime, "swap");
+            if (swapCancelled) {
+              addLog("Clober Swap: Dihentikan saat periode tunggu.", "swap");
+              break;
+            }
+          }
         }
+
+        if (j < PRIVATE_KEY.length) {
+          const delayTime = getRandomDelayPerWallet();
+          const minutes = Math.floor(delayTime / 60000);
+          const seconds = Math.floor((delayTime % 60000) / 1000);
+          addLog(
+            `Persiapan pindah ke wallet berikutnya. Menunggu ${minutes} menit ${seconds} detik.`,
+            "system"
+          );
+          await waitWithCancel(delayTime, "swap");
+          if (swapCancelled) {
+            addLog("Clober Swap: Dihentikan saat periode tunggu.", "swap");
+            break;
+          }
+        }
+
+        j++;
       }
+
+      swapRunning = false;
+      mainMenu.setItems(getMainMenuItems());
+      cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
+      safeRender();
+      addLog("Clober Swap: Auto Swap MON & WMON selesai.", "swap");
     }
-    swapRunning = false;
-    mainMenu.setItems(getMainMenuItems());
-    cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
-    safeRender();
-    addLog("Clober Swap: Auto Swap MON & WMON selesai.", "swap");
-  });
+  );
 }
 
 async function runAutoSwapMonUsdc() {
   promptBox.setFront();
-  promptBox.readInput("Masukkan jumlah swap MON & USDC", "", async (err, value) => {
-    promptBox.hide();
-    safeRender();
-    if (err || !value) {
-      addLog("Clober Swap: Input tidak valid atau dibatalkan.", "swap");
-      return;
-    }
-    const loopCount = parseInt(value);
-    if (isNaN(loopCount)) {
-      addLog("Clober Swap: Input harus berupa angka.", "swap");
-      return;
-    }
-    addLog(`Clober Swap: Mulai ${loopCount} iterasi swap MON & USDC.`, "swap");
-
-    swapRunning = true;
-    swapCancelled = false;
-    mainMenu.setItems(getMainMenuItems());
-    cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
-    cloberSwapSubMenu.show();
-    safeRender();
-
-    for (let i = 1; i <= loopCount; i++) {
-      if (swapCancelled) {
-        addLog(`Clober Swap: Auto Swap MON & USDC Dihentikan pada Cycle ${i}.`, "swap");
-        break;
+  promptBox.readInput(
+    "Masukkan jumlah swap MON & USDC",
+    "",
+    async (err, value) => {
+      promptBox.hide();
+      safeRender();
+      if (err || !value) {
+        addLog("Clober Swap: Input tidak valid atau dibatalkan.", "swap");
+        return;
       }
-      addLog(`Memulai swap ke-${i}: Arah ${lastSwapDirectionMonUsdc === "MON_TO_USDC" ? "USDC_TO_MON" : "MON_TO_USDC"}`, "swap");
-      const success = await autoSwapMonUsdc();
-      if (success) {
+      const loopCount = parseInt(value);
+      if (isNaN(loopCount)) {
+        addLog("Clober Swap: Input harus berupa angka.", "swap");
+        return;
+      }
+      addLog(
+        `Clober Swap: Mulai ${loopCount} iterasi swap MON & USDC.`,
+        "swap"
+      );
+
+      let j = 1;
+
+      for (const key of PRIVATE_KEY) {
+        nextNonce = null;
+        swapRunning = true;
+        swapCancelled = false;
+        mainMenu.setItems(getMainMenuItems());
+        cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
+        cloberSwapSubMenu.show();
+        safeRender();
+
+        currentWallet = key;
+
         await updateWalletData();
-      }
-      if (i < loopCount) {
-        const delayTime = getRandomDelay();
-        const minutes = Math.floor(delayTime / 60000);
-        const seconds = Math.floor((delayTime % 60000) / 1000);
-        addLog(`Swap ke-${i} selesai. Menunggu ${minutes} menit ${seconds} detik.`, "swap");
-        await waitWithCancel(delayTime, "swap");
-        if (swapCancelled) {
-          addLog("Clober Swap: Dihentikan saat periode tunggu.", "swap");
-          break;
+
+        let i = 1;
+
+        for (i; i <= loopCount; i++) {
+          if (swapCancelled) {
+            addLog(
+              `Clober Swap: Auto Swap MON & USDC Dihentikan pada Cycle ${i}.`,
+              "swap"
+            );
+            break;
+          }
+          addLog(
+            `Memulai swap ke-${i}: Arah ${
+              lastSwapDirectionMonUsdc === "MON_TO_USDC"
+                ? "USDC_TO_MON"
+                : "MON_TO_USDC"
+            }`,
+            "swap"
+          );
+          const success = await autoSwapMonUsdc();
+          if (success) {
+            await updateWalletData();
+          }
+          if (i < loopCount) {
+            const delayTime = getRandomDelay();
+            const minutes = Math.floor(delayTime / 60000);
+            const seconds = Math.floor((delayTime % 60000) / 1000);
+            addLog(
+              `Swap ke-${i} selesai. Menunggu ${minutes} menit ${seconds} detik.`,
+              "swap"
+            );
+            await waitWithCancel(delayTime, "swap");
+            if (swapCancelled) {
+              addLog("Clober Swap: Dihentikan saat periode tunggu.", "swap");
+              break;
+            }
+          }
         }
+
+        if (j < PRIVATE_KEY.length) {
+          const delayTime = getRandomDelayPerWallet();
+          const minutes = Math.floor(delayTime / 60000);
+          const seconds = Math.floor((delayTime % 60000) / 1000);
+          addLog(
+            `Persiapan pindah ke wallet berikutnya. Menunggu ${minutes} menit ${seconds} detik.`,
+            "system"
+          );
+          await waitWithCancel(delayTime, "swap");
+          if (swapCancelled) {
+            addLog("Clober Swap: Dihentikan saat periode tunggu.", "swap");
+            break;
+          }
+        }
+
+        j++;
       }
+
+      swapRunning = false;
+      mainMenu.setItems(getMainMenuItems());
+      cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
+      safeRender();
+      addLog("Clober Swap: Auto Swap MON & USDC selesai.", "swap");
     }
-    swapRunning = false;
-    mainMenu.setItems(getMainMenuItems());
-    cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
-    safeRender();
-    addLog("Clober Swap: Auto Swap MON & USDC selesai.", "swap");
-  });
+  );
 }
 
 async function runAutoSwapMonSmon() {
   promptBox.setFront();
-  promptBox.readInput("Masukkan jumlah swap MON & sMON", "", async (err, value) => {
-    promptBox.hide();
-    safeRender();
-    if (err || !value) {
-      addLog("Clober Swap: Input tidak valid atau dibatalkan.", "swap");
-      return;
-    }
-    const loopCount = parseInt(value);
-    if (isNaN(loopCount)) {
-      addLog("Clober Swap: Input harus berupa angka.", "swap");
-      return;
-    }
-    addLog(`Clober Swap: Mulai ${loopCount} iterasi swap MON & sMON.`, "swap");
-
-    swapRunning = true;
-    swapCancelled = false;
-    mainMenu.setItems(getMainMenuItems());
-    cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
-    cloberSwapSubMenu.show();
-    safeRender();
-
-    for (let i = 1; i <= loopCount; i++) {
-      if (swapCancelled) {
-        addLog(`Clober Swap: Auto Swap MON & sMON Dihentikan pada Cycle ${i}.`, "swap");
-        break;
+  promptBox.readInput(
+    "Masukkan jumlah swap MON & sMON",
+    "",
+    async (err, value) => {
+      promptBox.hide();
+      safeRender();
+      if (err || !value) {
+        addLog("Clober Swap: Input tidak valid atau dibatalkan.", "swap");
+        return;
       }
-      addLog(`Memulai swap ke-${i}: Arah ${lastSwapDirectionMonSmon === "MON_TO_sMON" ? "sMON_TO_MON" : "MON_TO_sMON"}`, "swap");
-      const success = await autoSwapMonSmon();
-      if (success) {
+      const loopCount = parseInt(value);
+      if (isNaN(loopCount)) {
+        addLog("Clober Swap: Input harus berupa angka.", "swap");
+        return;
+      }
+      addLog(
+        `Clober Swap: Mulai ${loopCount} iterasi swap MON & sMON.`,
+        "swap"
+      );
+
+      let j = 1;
+
+      for (const key of PRIVATE_KEY) {
+        nextNonce = null;
+        swapRunning = true;
+        swapCancelled = false;
+        mainMenu.setItems(getMainMenuItems());
+        cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
+        cloberSwapSubMenu.show();
+        safeRender();
+
+        currentWallet = key;
+
         await updateWalletData();
-      }
-      if (i < loopCount) {
-        const delayTime = getRandomDelay();
-        const minutes = Math.floor(delayTime / 60000);
-        const seconds = Math.floor((delayTime % 60000) / 1000);
-        addLog(`Swap ke-${i} selesai. Menunggu ${minutes} menit ${seconds} detik.`, "swap");
-        await waitWithCancel(delayTime, "swap");
-        if (swapCancelled) {
-          addLog("Clober Swap: Dihentikan saat periode tunggu.", "swap");
-          break;
+
+        let i = 1;
+
+        for (i; i <= loopCount; i++) {
+          if (swapCancelled) {
+            addLog(
+              `Clober Swap: Auto Swap MON & sMON Dihentikan pada Cycle ${i}.`,
+              "swap"
+            );
+            break;
+          }
+          addLog(
+            `Memulai swap ke-${i}: Arah ${
+              lastSwapDirectionMonSmon === "MON_TO_sMON"
+                ? "sMON_TO_MON"
+                : "MON_TO_sMON"
+            }`,
+            "swap"
+          );
+          const success = await autoSwapMonSmon();
+          if (success) {
+            await updateWalletData();
+          }
+          if (i < loopCount) {
+            const delayTime = getRandomDelay();
+            const minutes = Math.floor(delayTime / 60000);
+            const seconds = Math.floor((delayTime % 60000) / 1000);
+            addLog(
+              `Swap ke-${i} selesai. Menunggu ${minutes} menit ${seconds} detik.`,
+              "swap"
+            );
+            await waitWithCancel(delayTime, "swap");
+            if (swapCancelled) {
+              addLog("Clober Swap: Dihentikan saat periode tunggu.", "swap");
+              break;
+            }
+          }
         }
+
+        if (j < PRIVATE_KEY.length) {
+          const delayTime = getRandomDelayPerWallet();
+          const minutes = Math.floor(delayTime / 60000);
+          const seconds = Math.floor((delayTime % 60000) / 1000);
+          addLog(
+            `Persiapan pindah ke wallet berikutnya. Menunggu ${minutes} menit ${seconds} detik.`,
+            "system"
+          );
+          await waitWithCancel(delayTime, "swap");
+          if (swapCancelled) {
+            addLog("Clober Swap: Dihentikan saat periode tunggu.", "swap");
+            break;
+          }
+        }
+
+        j++;
       }
+
+      swapRunning = false;
+      mainMenu.setItems(getMainMenuItems());
+      cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
+      safeRender();
+      addLog("Clober Swap: Auto Swap MON & sMON selesai.", "swap");
     }
-    swapRunning = false;
-    mainMenu.setItems(getMainMenuItems());
-    cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
-    safeRender();
-    addLog("Clober Swap: Auto Swap MON & sMON selesai.", "swap");
-  });
+  );
 }
 
 async function runAutoSwapMonDak() {
   promptBox.setFront();
-  promptBox.readInput("Masukkan jumlah swap MON & DAK", "", async (err, value) => {
-    promptBox.hide();
-    safeRender();
-    if (err || !value) {
-      addLog("Clober Swap: Input tidak valid atau dibatalkan.", "swap");
-      return;
-    }
-    const loopCount = parseInt(value);
-    if (isNaN(loopCount)) {
-      addLog("Clober Swap: Input harus berupa angka.", "swap");
-      return;
-    }
-    addLog(`Clober Swap: Mulai ${loopCount} iterasi swap MON & DAK.`, "swap");
-
-    swapRunning = true;
-    swapCancelled = false;
-    mainMenu.setItems(getMainMenuItems());
-    cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
-    cloberSwapSubMenu.show();
-    safeRender();
-
-    for (let i = 1; i <= loopCount; i++) {
-      if (swapCancelled) {
-        addLog(`Clober Swap: Auto Swap MON & DAK Dihentikan pada Cycle ${i}.`, "swap");
-        break;
+  promptBox.readInput(
+    "Masukkan jumlah swap MON & DAK",
+    "",
+    async (err, value) => {
+      promptBox.hide();
+      safeRender();
+      if (err || !value) {
+        addLog("Clober Swap: Input tidak valid atau dibatalkan.", "swap");
+        return;
       }
-      addLog(`Memulai swap ke-${i}: Arah ${lastSwapDirectionMonDak === "MON_TO_DAK" ? "DAK_TO_MON" : "MON_TO_DAK"}`, "swap");
-      const success = await autoSwapMonDak();
-      if (success) {
+      const loopCount = parseInt(value);
+      if (isNaN(loopCount)) {
+        addLog("Clober Swap: Input harus berupa angka.", "swap");
+        return;
+      }
+      addLog(`Clober Swap: Mulai ${loopCount} iterasi swap MON & DAK.`, "swap");
+
+      let j = 1;
+
+      for (const key of PRIVATE_KEY) {
+        nextNonce = null;
+        swapRunning = true;
+        swapCancelled = false;
+        mainMenu.setItems(getMainMenuItems());
+        cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
+        cloberSwapSubMenu.show();
+        safeRender();
+
+        currentWallet = key;
+
         await updateWalletData();
-      }
-      if (i < loopCount) {
-        const delayTime = getRandomDelay();
-        const minutes = Math.floor(delayTime / 60000);
-        const seconds = Math.floor((delayTime % 60000) / 1000);
-        addLog(`Swap ke-${i} selesai. Menunggu ${minutes} menit ${seconds} detik.`, "swap");
-        await waitWithCancel(delayTime, "swap");
-        if (swapCancelled) {
-          addLog("Clober Swap: Dihentikan saat periode tunggu.", "swap");
-          break;
+
+        let i = 1;
+
+        for (i; i <= loopCount; i++) {
+          if (swapCancelled) {
+            addLog(
+              `Clober Swap: Auto Swap MON & DAK Dihentikan pada Cycle ${i}.`,
+              "swap"
+            );
+            break;
+          }
+          addLog(
+            `Memulai swap ke-${i}: Arah ${
+              lastSwapDirectionMonDak === "MON_TO_DAK"
+                ? "DAK_TO_MON"
+                : "MON_TO_DAK"
+            }`,
+            "swap"
+          );
+          const success = await autoSwapMonDak();
+          if (success) {
+            await updateWalletData();
+          }
+          if (i < loopCount) {
+            const delayTime = getRandomDelay();
+            const minutes = Math.floor(delayTime / 60000);
+            const seconds = Math.floor((delayTime % 60000) / 1000);
+            addLog(
+              `Swap ke-${i} selesai. Menunggu ${minutes} menit ${seconds} detik.`,
+              "swap"
+            );
+            await waitWithCancel(delayTime, "swap");
+            if (swapCancelled) {
+              addLog("Clober Swap: Dihentikan saat periode tunggu.", "swap");
+              break;
+            }
+          }
         }
+
+        if (j < PRIVATE_KEY.length) {
+          const delayTime = getRandomDelayPerWallet();
+          const minutes = Math.floor(delayTime / 60000);
+          const seconds = Math.floor((delayTime % 60000) / 1000);
+          addLog(
+            `Persiapan pindah ke wallet berikutnya. Menunggu ${minutes} menit ${seconds} detik.`,
+            "system"
+          );
+          await waitWithCancel(delayTime, "swap");
+          if (swapCancelled) {
+            addLog("Clober Swap: Dihentikan saat periode tunggu.", "swap");
+            break;
+          }
+        }
+
+        j++;
       }
+
+      swapRunning = false;
+      mainMenu.setItems(getMainMenuItems());
+      cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
+      safeRender();
+      addLog("Clober Swap: Auto Swap MON & DAK selesai.", "swap");
     }
-    swapRunning = false;
-    mainMenu.setItems(getMainMenuItems());
-    cloberSwapSubMenu.setItems(getCloberSwapMenuItems());
-    safeRender();
-    addLog("Clober Swap: Auto Swap MON & DAK selesai.", "swap");
-  });
+  );
 }
 
 function changeRandomAmount(pair) {
   const pairKey = pair.replace(" & ", "_");
   const token2 = pair.split(" & ")[1];
   promptBox.setFront();
-  promptBox.input(`Masukkan rentang random amount untuk MON pada pasangan ${pair} (format: min,max, contoh: 0.1,0.5)`, "", (err, valueMon) => {
-    promptBox.hide();
-    safeRender();
-    if (err || !valueMon) {
-      addLog(`Change Random Amount: Input untuk MON pada ${pair} dibatalkan.`, "system");
-      changeRandomAmountSubMenu.show();
-      changeRandomAmountSubMenu.focus();
-      safeRender();
-      return;
-    }
-    const [minMon, maxMon] = valueMon.split(",").map(v => parseFloat(v.trim()));
-    if (isNaN(minMon) || isNaN(maxMon) || minMon <= 0 || maxMon <= minMon) {
-      addLog(`Change Random Amount: Input tidak valid untuk MON pada ${pair}. Gunakan format min,max (contoh: 0.1,0.5) dengan min > 0 dan max > min.`, "error");
-      changeRandomAmountSubMenu.show();
-      changeRandomAmountSubMenu.focus();
-      safeRender();
-      return;
-    }
-
-    promptBox.setFront();
-    promptBox.input(`Masukkan rentang random amount untuk ${token2} pada pasangan ${pair} (format: min,max, contoh: 0.1,0.5)`, "", (err, valueToken2) => {
+  promptBox.input(
+    `Masukkan rentang random amount untuk MON pada pasangan ${pair} (format: min,max, contoh: 0.1,0.5)`,
+    "",
+    (err, valueMon) => {
       promptBox.hide();
       safeRender();
-      if (err || !valueToken2) {
-        addLog(`Change Random Amount: Input untuk ${token2} pada ${pair} dibatalkan.`, "system");
+      if (err || !valueMon) {
+        addLog(
+          `Change Random Amount: Input untuk MON pada ${pair} dibatalkan.`,
+          "system"
+        );
         changeRandomAmountSubMenu.show();
         changeRandomAmountSubMenu.focus();
         safeRender();
         return;
       }
-      const [minToken2, maxToken2] = valueToken2.split(",").map(v => parseFloat(v.trim()));
-      if (isNaN(minToken2) || isNaN(maxToken2) || minToken2 <= 0 || maxToken2 <= minToken2) {
-        addLog(`Change Random Amount: Input tidak valid untuk ${token2} pada ${pair}. Gunakan format min,max (contoh: 0.1,0.5) dengan min > 0 dan max > min.`, "error");
+      const [minMon, maxMon] = valueMon
+        .split(",")
+        .map((v) => parseFloat(v.trim()));
+      if (isNaN(minMon) || isNaN(maxMon) || minMon <= 0 || maxMon <= minMon) {
+        addLog(
+          `Change Random Amount: Input tidak valid untuk MON pada ${pair}. Gunakan format min,max (contoh: 0.1,0.5) dengan min > 0 dan max > min.`,
+          "error"
+        );
         changeRandomAmountSubMenu.show();
         changeRandomAmountSubMenu.focus();
         safeRender();
         return;
       }
 
-      randomAmountRanges[pairKey] = {
-        MON: { min: minMon, max: maxMon },
-        [token2]: { min: minToken2, max: maxToken2 }
-      };
-      addLog(`Change Random Amount: Random Ammount ${pair} diubah menjadi MON: ${minMon} - ${maxMon}, ${token2}: ${minToken2} - ${maxToken2}.`, "success");
-      changeRandomAmountSubMenu.show();
-      changeRandomAmountSubMenu.focus();
-      safeRender();
-    });
-  });
+      promptBox.setFront();
+      promptBox.input(
+        `Masukkan rentang random amount untuk ${token2} pada pasangan ${pair} (format: min,max, contoh: 0.1,0.5)`,
+        "",
+        (err, valueToken2) => {
+          promptBox.hide();
+          safeRender();
+          if (err || !valueToken2) {
+            addLog(
+              `Change Random Amount: Input untuk ${token2} pada ${pair} dibatalkan.`,
+              "system"
+            );
+            changeRandomAmountSubMenu.show();
+            changeRandomAmountSubMenu.focus();
+            safeRender();
+            return;
+          }
+          const [minToken2, maxToken2] = valueToken2
+            .split(",")
+            .map((v) => parseFloat(v.trim()));
+          if (
+            isNaN(minToken2) ||
+            isNaN(maxToken2) ||
+            minToken2 <= 0 ||
+            maxToken2 <= minToken2
+          ) {
+            addLog(
+              `Change Random Amount: Input tidak valid untuk ${token2} pada ${pair}. Gunakan format min,max (contoh: 0.1,0.5) dengan min > 0 dan max > min.`,
+              "error"
+            );
+            changeRandomAmountSubMenu.show();
+            changeRandomAmountSubMenu.focus();
+            safeRender();
+            return;
+          }
+
+          randomAmountRanges[pairKey] = {
+            MON: { min: minMon, max: maxMon },
+            [token2]: { min: minToken2, max: maxToken2 },
+          };
+          addLog(
+            `Change Random Amount: Random Ammount ${pair} diubah menjadi MON: ${minMon} - ${maxMon}, ${token2}: ${minToken2} - ${maxToken2}.`,
+            "success"
+          );
+          changeRandomAmountSubMenu.show();
+          changeRandomAmountSubMenu.focus();
+          safeRender();
+        }
+      );
+    }
+  );
 }
 
 mainMenu.on("select", (item) => {
@@ -1512,25 +2244,37 @@ cloberSwapSubMenu.on("select", (item) => {
   const selected = item.getText();
   if (selected === "Auto Swap MON & WMON") {
     if (swapRunning) {
-      addLog("Transaksi Clober Swap sedang berjalan. Hentikan transaksi terlebih dahulu.", "warning");
+      addLog(
+        "Transaksi Clober Swap sedang berjalan. Hentikan transaksi terlebih dahulu.",
+        "warning"
+      );
     } else {
       runAutoSwapMonWmon();
     }
   } else if (selected === "Auto Swap MON & USDC") {
     if (swapRunning) {
-      addLog("Transaksi Clober Swap sedang berjalan. Hentikan transaksi terlebih dahulu.", "warning");
+      addLog(
+        "Transaksi Clober Swap sedang berjalan. Hentikan transaksi terlebih dahulu.",
+        "warning"
+      );
     } else {
       runAutoSwapMonUsdc();
     }
   } else if (selected === "Auto Swap MON & sMON") {
     if (swapRunning) {
-      addLog("Transaksi Clober Swap sedang berjalan. Hentikan transaksi terlebih dahulu.", "warning");
+      addLog(
+        "Transaksi Clober Swap sedang berjalan. Hentikan transaksi terlebih dahulu.",
+        "warning"
+      );
     } else {
       runAutoSwapMonSmon();
     }
   } else if (selected === "Auto Swap MON & DAK") {
     if (swapRunning) {
-      addLog("Transaksi Clober Swap sedang berjalan. Hentikan transaksi terlebih dahulu.", "warning");
+      addLog(
+        "Transaksi Clober Swap sedang berjalan. Hentikan transaksi terlebih dahulu.",
+        "warning"
+      );
     } else {
       runAutoSwapMonDak();
     }
@@ -1579,8 +2323,14 @@ changeRandomAmountSubMenu.on("select", (item) => {
 });
 
 screen.key(["escape", "q", "C-c"], () => process.exit(0));
-screen.key(["C-up"], () => { logsBox.scroll(-1); safeRender(); });
-screen.key(["C-down"], () => { logsBox.scroll(1); safeRender(); });
+screen.key(["C-up"], () => {
+  logsBox.scroll(-1);
+  safeRender();
+});
+screen.key(["C-down"], () => {
+  logsBox.scroll(1);
+  safeRender();
+});
 
 safeRender();
 mainMenu.focus();
